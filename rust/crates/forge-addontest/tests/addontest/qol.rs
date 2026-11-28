@@ -1411,6 +1411,136 @@ fn kill_targets_skip_a_friendly_namesake_but_talk_and_item_targets_can_be_friend
 }
 
 #[test]
+fn kill_targets_of_an_npc_the_codex_marks_friendly_to_the_character_s_side_keep_the_plain_lookups() {
+	let out = run(r#"
+		local side = "Horde"
+		UnitFactionGroup = function() return side, side end
+		local factions = { [10556] = "H", [12427] = "A" }
+		Polestar.Codex = {
+			IsLoaded = function() return true end,
+			Npc = function(id) return factions[id] and { id = id, faction = factions[id] } or nil end,
+		}
+		local function macros(goal)
+			if goal then q.step({ goal }) end
+			local out = {}
+			for _, button in ipairs({ PolestarTargetButton, PolestarStepButton, PolestarTargetRow1 }) do
+				out[#out + 1] = button:GetAttribute("macrotext") or false
+			end
+			emit(out)
+		end
+		local peon = { t = "kill", quest = 5441, target = "Lazy Peon", npc = 10556 }
+		macros(peon)
+		-- A press on a living Lazy Peon moves on from it (Buttons.WireCycle).
+		local pressed = {}
+		for _, button in ipairs({ PolestarTargetButton, PolestarStepButton, PolestarTargetRow1 }) do
+			q.target = { name = "Lazy Peon", hostile = false }
+			q.ran = {}
+			q.keyClick(button)
+			pressed[#pressed + 1] = q.ran[1] and q.ran[1][2] or false
+		end
+		q.target = false
+		emit(pressed)
+		side = "Alliance"
+		macros({ t = "kill", quest = 5625, target = "Mountaineer Dolf", npc = 12427 })
+		macros(peon)
+		factions[10556] = "AH"
+		Polestar.Fire("CODEX_LOADED")
+		stub.runTimers()
+		macros()
+	"#);
+	let plain = |name: &str| format!("/cleartarget [nocombat][dead]\n/targetexact {name}\n/cleartarget [dead]");
+	assert_eq!(out[0], json!(vec![plain("Lazy Peon"); 3]), "a Horde character's Lazy Peon (faction H)");
+	assert_eq!(
+		out[1],
+		json!(vec!["/targetexact Lazy Peon\n/cleartarget [dead]"; 3]),
+		"a press on a living Lazy Peon keeps the plain lookup on the button, the step key and the row"
+	);
+	assert_eq!(out[2], json!(vec![plain("Mountaineer Dolf"); 3]), "an Alliance character's Mountaineer Dolf (faction A)");
+	assert_eq!(out[3], json!(vec![kill_macro("Lazy Peon"); 3]), "the other side's NPC keeps the retry");
+	assert_eq!(out[4], json!(vec![plain("Lazy Peon"); 3]), "faction AH, applied again when the Codex loads");
+	let peon = Unit { name: "Lazy Peon", dead: false, harm: false, yd: 3 };
+	let dolf = Unit { name: "Mountaineer Dolf", ..peon };
+	for (row, unit) in [(&out[0], peon), (&out[2], dolf), (&out[4], peon)] {
+		for macro_text in row.as_array().unwrap() {
+			for combat in [false, true] {
+				assert_eq!(play_macro_unit(text(macro_text), &[unit], None, combat), Some(unit));
+			}
+		}
+	}
+}
+
+#[test]
+fn kill_targets_of_an_npc_are_plain_until_the_codex_loads_on_demand_with_lookup_on_and_never_with_lookup_off() {
+	let out = run(r#"
+		UnitFactionGroup = function() return "Alliance", "Alliance" end
+		local loaded, loads = false, 0
+		Polestar.Codex = {
+			IsLoaded = function() return loaded end,
+			Load = function() loads = loads + 1; loaded = true; Polestar.Fire("CODEX_LOADED"); return true end,
+			Npc = function(id) return id == 10556 and { id = id, faction = "H" } or nil end,
+		}
+		local function macros()
+			local out = {}
+			for _, button in ipairs({ PolestarTargetButton, PolestarStepButton, PolestarTargetRow1 }) do
+				out[#out + 1] = button:GetAttribute("macrotext") or false
+			end
+			return out
+		end
+		local peon = { t = "kill", quest = 5441, target = "Lazy Peon", npc = 10556 }
+		Polestar.Set("lookup.enabled", false)
+		q.step({ peon })
+		stub.runTimers()
+		emit({ macros(), loads })
+		q.step({ { t = "goto", map = 9000, x = 1, y = 1 } })
+		stub.runTimers()
+		Polestar.Set("lookup.enabled", true)
+		stub.runTimers()
+		-- Asked during a build: nil now, the load on the next frame.
+		emit({ Polestar.QoL.Buttons.KillVerb("kill", 10556) or false, loads })
+		q.step({ peon })
+		stub.runTimers()
+		emit({ macros(), loads })
+	"#);
+	let plain = "/cleartarget [nocombat][dead]\n/targetexact Lazy Peon\n/cleartarget [dead]";
+	assert_eq!(out[0], json!([vec![plain; 3], 0]), "Lookup off: the Codex is not loaded and the kill keeps the plain lookup");
+	assert_eq!(out[1], json!([false, 0]), "Lookup on: plain while the build runs, the load waits for the next frame");
+	assert_eq!(out[2], json!([vec![kill_macro("Lazy Peon"); 3], 1]), "loaded once; the other side's NPC then gets the retry");
+}
+
+#[test]
+fn kill_targets_of_an_npc_never_load_the_codex_in_combat_and_stay_plain() {
+	let out = run(r#"
+		local B = Polestar.QoL.Buttons
+		Polestar.Set("lookup.enabled", true)
+		local loaded, loads = false, 0
+		Polestar.Codex = {
+			IsLoaded = function() return loaded end,
+			Load = function() loads = loads + 1; loaded = true; return true end,
+			Npc = function(id) return id == 10556 and { id = id, faction = "H" } or nil end,
+		}
+		q.step({ { t = "goto", map = 9000, x = 1, y = 1 } })
+		stub.runTimers()
+		-- Asked in a fight: no load is requested, not even once the fight ends.
+		q.combat(true)
+		local inFight = B.KillVerb("kill", 10556)
+		q.combat(false)
+		stub.runTimers()
+		emit({ inFight or false, loads })
+		-- Asked before a fight whose frame runs the request: no load in the fight.
+		local before = B.KillVerb("kill", 10556)
+		q.combat(true)
+		stub.runTimers()
+		emit({ before or false, loads })
+		q.combat(false)
+		stub.runTimers()
+		emit(loads)
+	"#);
+	assert_eq!(out[0], json!([false, 0]), "in combat: plain, and no load is asked for");
+	assert_eq!(out[1], json!([false, 0]), "a request that comes due in combat loads nothing");
+	assert_eq!(out[2], json!(0));
+}
+
+#[test]
 fn befouled_by_satyr_retries_the_preferred_kill_before_searching_the_other_names() {
 	let out = run(r#"
 		set("markTarget", true)
@@ -2522,6 +2652,8 @@ fn target_button_names_the_while_you_re_here_rows_mobs_after_the_step_s_own_near
 		&[
 			TARGET_HERE_ROWS,
 			r#"
+		-- A loaded Codex that marks neither NPC friendly: the kill keeps the retry (Buttons.KillVerb).
+		Polestar.Codex = { IsLoaded = function() return true end, Npc = function() return nil end }
 		q.step({ { t = "kill", target = "Mottled Screecher", npc = 1021 }, { t = "kill", target = "Mottled Raptor", status = "done" } })
 		emit(tnames())
 		rows({

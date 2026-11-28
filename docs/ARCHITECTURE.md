@@ -7690,6 +7690,23 @@ apply. A friendly namesake of a later kill can stay selected. The harm-only
 mob mark skips it; a mixed macro also has the friendly NPC mark described
 above.
 
+A kill whose NPC the loaded Codex marks friendly to the character's side
+(npc `faction` "AH", or "A" or "H" for the side; `Buttons.KillVerb`: Lazy
+Peon, Mountaineer Dolf) is not a leading kill: its name keeps the plain
+lookups, so a friendly unit alone is still targeted. While the Codex is not
+loaded, a kill with an NPC id keeps the plain lookups too. With Lookup on
+(`lookup.enabled`) and out of combat, `KillVerb` asks for the Codex on the
+next frame (`ns.After(0)`, one request at a time), so `Codex.Load` and the
+`CODEX_LOADED` handlers never run inside a button or guide-name build; on
+`CODEX_LOADED` the buttons (their signatures cleared, `refreshSoon`) and the
+clickable guide names (`NameTargets.Refresh`) are applied again. With Lookup
+off, in combat, or the Codex missing, the kill stays plain. A kill with no
+NPC id keeps the retry. An empty faction in a loaded record means hostile or
+not known, and also an NPC friendly to both sides that has no services and
+starts or ends no quest (the data build leaves "AH" out for those,
+`npc_faction` in `rust/crates/forge-data/src/merge.rs`): a kill of such an
+NPC keeps the retry.
+
 After a press, the icon cycle (`Buttons.AdvanceMark`) uses the kind of the name
 the press acquired (`Buttons.AcquiredIndex`: the target's readable name against
 the button's applied list), so a fallback advances its own kind's cycle; a step

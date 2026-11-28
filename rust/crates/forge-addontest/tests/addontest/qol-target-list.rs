@@ -16,6 +16,8 @@ local q = stub.qol
 local B = Polestar.QoL.Buttons
 local t = PolestarTargetButton
 local function set(k, v) Polestar.Set("qol." .. k, v); stub.runTimers() end
+-- A loaded Codex that marks none of these NPCs friendly: their kills keep the retry (Buttons.KillVerb).
+Polestar.Codex = { IsLoaded = function() return true end, Npc = function() return nil end }
 -- The macros below are the plain ones: the default mark (#2036) is switched
 -- off here, and checked on its own (target_list_rows_mark_by_default...).
 set("markTarget", false)
@@ -1366,6 +1368,20 @@ fn target_list_folded_names_of_one_kind_keep_the_single_mark_line_and_the_row_s_
 	assert_eq!(out[0], format!("{VERMIN}\n/targetexact [noexists] Kobold Worker\n/cleartarget [dead]\n/tm [@target,harm,nodead] ~2"), "one mob mark after the names that fit");
 	assert_eq!(out[1], json!(["Kobold Vermin", "Kobold Worker"]), "the retry adds no folded name");
 	assert_eq!(out[2], json!(["mob"]));
+}
+
+#[test]
+fn target_list_a_folded_row_keeps_the_plain_lookup_for_a_kill_of_an_npc_the_codex_marks_friendly() {
+	let out = run(r#"
+		UnitFactionGroup = function() return "Horde", "Horde" end
+		Polestar.Codex = { IsLoaded = function() return true end, Npc = function(id) return id == 10556 and { id = id, faction = "H" } or nil end }
+		q.step({ { t = "kill", quest = 5441, target = "Lazy Peon", npc = 10556 }, { t = "kill", target = "Kobold Vermin" } })
+		B.anchor:GetScript("OnClick")(B.anchor, "LeftButton")
+		emit({ B.rows[1]:GetAttribute("macrotext"), B.rows[1].names })
+	"#);
+	let searches = "/cleartarget [nocombat][dead]\n/targetexact Lazy Peon\n/cleartarget [dead]\n/targetexact [noexists] Kobold Vermin\n/cleartarget [dead]";
+	assert!(out[0][0].as_str().unwrap().starts_with(searches), "{}", out[0][0]);
+	assert_eq!(out[0][1], json!(["Lazy Peon", "Kobold Vermin"]));
 }
 
 // The preview harness (and any client) without UnitIsDead or UnitIsPlayer: no close mob, and no error (#1704's red

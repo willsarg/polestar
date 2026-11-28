@@ -19,6 +19,8 @@ test('guide name: one localized chosen NPC uses the shared macro, with the defau
 	const out = run(`
 		emit({ Polestar.GetDefault("qol.guideNameTarget"), Polestar.GetDefault("qol.markTarget") })
 		Polestar.Names = { Npc = function(id) return ({ [10] = "Loup gris", [20] = "Maître des griffons" })[id] end }
+		-- A loaded Codex that marks neither NPC friendly: the kill keeps the retry (Buttons.KillVerb).
+		Polestar.Codex = { IsLoaded = function() return true end, Npc = function() return nil end }
 		Polestar.QoL.CurrentStep = function() error("must not inspect other goals") end
 		local function result(goal, raw)
 			local macro, name, kind = B.GuideNameMacro(goal, raw)

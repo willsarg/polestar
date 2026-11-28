@@ -1919,6 +1919,37 @@ function Buttons.MacroNameCount(text)
 	return count - (retry and 1 or 0), retry
 end
 
+-- The verb TargetMacro takes for a goal of verb on NPC id npc: nil for a kill
+-- whose NPC the loaded Codex marks friendly to the character's side (faction
+-- "AH", or the side's "A" or "H": Lazy Peon, Mountaineer Dolf), so that name
+-- keeps the plain lookups; else verb. While the Codex is not loaded a kill of
+-- a known NPC is nil too; with Lookup on and out of combat the Codex is asked
+-- to load on the next frame, outside the build that asked, and CODEX_LOADED
+-- applies the buttons again. A kill with no NPC id keeps verb.
+-- (Buttons.codexAsked, a request pending: a field, not a local, as the file
+-- is at Lua's limit of 200 locals.)
+function Buttons.KillVerb(verb, npc)
+	if verb ~= "kill" or not npc then return verb end
+	local C = ns.Codex
+	if not (C and C.IsLoaded and C.Npc) then return nil end
+	if not C.IsLoaded() then
+		if not Buttons.codexAsked and C.Load and ns.Get("lookup.enabled") and not QoL.InLockdown() then
+			Buttons.codexAsked = true
+			ns.After(0, function()
+				Buttons.codexAsked = false
+				if not C.IsLoaded() and ns.Get("lookup.enabled") and not QoL.InLockdown() then C.Load() end
+			end)
+		end
+		return nil
+	end
+	local rec = C.Npc(npc)
+	local f = rec and rec.faction
+	if not f then return verb end
+	local side = ns.Compat.GetPlayerFaction()
+	if f == "AH" or f == (side == "Alliance" and "A" or side == "Horde" and "H") then return nil end
+	return verb
+end
+
 -- The target button's and the step key's macro (Buttons.TargetMacro) for list
 -- from first, kindOf(i) giving name i's kind ("mob" or "npc") and verb, and the ping:
 -- the mark of the first name's kind, or, when the names the macro holds are of
@@ -1966,10 +1997,12 @@ end
 local target = { list = {}, verbs = {}, ids = {}, marks = {}, sig = nil, namesSig = "", cycle = 1, info = {}, foldFirst = nil }
 
 -- The mark and ping the target button's name i (default: the one the next
--- click tries first) takes: "npc" for an NPC goal's name, else "mob".
+-- click tries first) takes: "npc" for an NPC goal's name, else "mob"; and
+-- its verb for TargetMacro (Buttons.KillVerb).
 local function targetKind(i)
-	local verb = target.verbs[i or target.cycle]
-	return NPC_VERBS[verb] and "npc" or "mob", verb
+	i = i or target.cycle
+	local verb = target.verbs[i]
+	return NPC_VERBS[verb] and "npc" or "mob", Buttons.KillVerb(verb, target.ids[i])
 end
 
 -- The single button that cycles (qol.targetSimple) instead of the list.
@@ -2763,7 +2796,7 @@ do
 		end
 		local fold = folded() and #list > 1
 		for i = 1, #TL.rows do
-			local r, name, text, kind, mixed = TL.rows[i], list[i], nil, nil, false
+			local r, name, text, kind, mixed, verb = TL.rows[i], list[i], nil, nil, false, nil
 			r.names, r.all, r.infos, r.looks = nil, nil, nil, {}
 			if fold then
 				-- Folded: the first row tries the names in the list's order, as the
@@ -2797,13 +2830,14 @@ do
 				local mark, ping
 				kind, mark, ping = markPing(i)
 				r.looks[name] = { target.verbs[i], target.ids[i], target.marks[i] }
-				text = Buttons.TargetMacro({ name }, 1, mark, ping, nil, target.verbs[i])
+				verb = Buttons.KillVerb(target.verbs[i], target.ids[i])
+				text = Buttons.TargetMacro({ name }, 1, mark, ping, nil, verb)
 				if text and #text > MACRO_LIMIT then text = nil end
 			end
 			r:SetAttribute("type", text and "macro" or nil)
 			r:SetAttribute("macrotext", text)
 			-- Its presses: the folded row's names, or its own name (Buttons.WireCycle).
-			Buttons.SetPress(r, text and (fold and list or { name }), fold and targetKind or (target.verbs[i] == "kill" and "kill" or kind), text, true)
+			Buttons.SetPress(r, text and (fold and list or { name }), fold and targetKind or (verb == "kill" and "kill" or kind), text, true)
 			r.applied = text and name or nil
 			-- The mark the row's click puts on (Buttons.AdvanceMark).
 			r.kind = r.applied and kind or nil
@@ -3444,7 +3478,7 @@ function Buttons.GuideNameMacro(goal, raw)
 	end
 	if not Buttons.MacroSafeName(name) then return nil end
 	local kind = (t == "kill" or t == "collect") and "mob" or "npc"
-	local macro = Buttons.TargetMacro({ name }, 1, Buttons.MarkLine(kind), nil, nil, t)
+	local macro = Buttons.TargetMacro({ name }, 1, Buttons.MarkLine(kind), nil, nil, Buttons.KillVerb(t, npc))
 	-- TargetMacro drops extra names to fit; a single long name cannot be trimmed.
 	if not macro or #macro > MACRO_LIMIT then return nil end
 	return macro, name, kind
@@ -3479,6 +3513,8 @@ local function stepGoal(view, raw, goals, optional)
 end
 
 local stepNames, stepSeen, stepVerbs = {}, {}, {}
+-- The step key's names' NPC ids (a field, not a local: the file is at Lua's local limit).
+Buttons.stepIds = {}
 function Buttons.StepAction(view, raw)
 	-- The open flight map's marked node first: the press flies there.
 	local F = QoL.Flight
@@ -3487,8 +3523,8 @@ function Buttons.StepAction(view, raw)
 	if not view then view, raw = QoL.CurrentStep() end
 	if not view then return nil end
 	local goals = view.goals or {}
-	local kind, value, verbs = stepGoal(view, raw, goals, false)
-	if not kind then kind, value, verbs = stepGoal(view, raw, goals, true) end
+	local kind, value, verbs, ids = stepGoal(view, raw, goals, false)
+	if not kind then kind, value, verbs, ids = stepGoal(view, raw, goals, true) end
 	if not kind and not onTaxi() then
 		local item = Buttons.ChooseQuestItem(view, raw)
 		if item then kind, value = "item", item end
@@ -3502,33 +3538,34 @@ function Buttons.StepAction(view, raw)
 		wipe(stepNames)
 		wipe(stepSeen)
 		wipe(stepVerbs)
+		wipe(Buttons.stepIds)
 		local npc = kind == "npc" and value or nil
 		if npc then
 			stepNames[1], stepVerbs[1], stepSeen[npc] = npc, verbs, true
 		else
 			for i = 1, kind and #value or 0 do
-				stepNames[i], stepVerbs[i], stepSeen[value[i]] = value[i], verbs[i], true
+				stepNames[i], stepVerbs[i], Buttons.stepIds[i], stepSeen[value[i]] = value[i], verbs[i], ids[i], true
 			end
 		end
 		local before = #stepNames
-		local here, hereVerbs = Buttons.HereNames()
+		local here, hereVerbs, hereIds = Buttons.HereNames()
 		for i = 1, #here do
 			if not stepSeen[here[i]] then
 				stepSeen[here[i]] = true
 				stepNames[#stepNames + 1] = here[i]
-				stepVerbs[#stepNames] = hereVerbs[i]
+				stepVerbs[#stepNames], Buttons.stepIds[#stepNames] = hereVerbs[i], hereIds[i]
 			end
 		end
 		if npc and #stepNames > before then
 			npcSpots(goals, raw, #goals)
 			local far = npcsFar()
 			farWatch = far
-			if far then moveBehind(1, before, #stepNames, stepNames, stepVerbs) end
-			return "target", stepNames, npc, stepVerbs
+			if far then moveBehind(1, before, #stepNames, stepNames, stepVerbs, Buttons.stepIds) end
+			return "target", stepNames, npc, stepVerbs, Buttons.stepIds
 		end
-		if not npc and #stepNames > 0 then return "target", stepNames, nil, stepVerbs end
+		if not npc and #stepNames > 0 then return "target", stepNames, nil, stepVerbs, Buttons.stepIds end
 	end
-	return kind, value, nil, kind == "target" and verbs or nil
+	return kind, value, nil, kind == "target" and verbs or nil, kind == "target" and ids or nil
 end
 
 -- npc: the one NPC's name in a "target" list (Buttons.StepAction), or nil.
@@ -3541,7 +3578,7 @@ local STEP_MARK = { target = "mob", npc = "npc" }
 local function stepKind(i)
 	if step.kind == "target" then
 		i = i or step.cycle
-		return step.list[i] == step.npc and "npc" or "mob", step.verbs[i]
+		return step.list[i] == step.npc and "npc" or "mob", Buttons.KillVerb(step.verbs[i], step.ids[i])
 	end
 	return STEP_MARK[step.kind]
 end
@@ -3760,18 +3797,20 @@ local function refresh()
 		applyRare(rareButton)
 	end
 
-	local kind, value, npc, verbs
-	if view then kind, value, npc, verbs = Buttons.StepAction(view, raw) end
-	local stepSig = mark .. (kind == "target" and ("target\n" .. tostring(npc) .. "\n" .. concat(value, "\n") .. "\t" .. concat(verbs, "\n")) or (tostring(kind) .. "\n" .. tostring(value)))
+	local kind, value, npc, verbs, ids
+	if view then kind, value, npc, verbs, ids = Buttons.StepAction(view, raw) end
+	local stepIdSig = ""
+	for i = 1, kind == "target" and #value or 0 do stepIdSig = stepIdSig .. "\t" .. tostring(ids[i]) end
+	local stepSig = mark .. (kind == "target" and ("target\n" .. tostring(npc) .. "\n" .. concat(value, "\n") .. "\t" .. concat(verbs, "\n") .. stepIdSig) or (tostring(kind) .. "\n" .. tostring(value)))
 	if stepSig ~= step.sig then
 		step.sig, step.kind, step.npc, step.cycle = stepSig, kind, npc, 1
-		local copy, cv = {}, {}
+		local copy, cv, ci = {}, {}, {}
 		if kind == "target" then
-			for i = 1, #value do copy[i], cv[i] = value[i], verbs[i] end
+			for i = 1, #value do copy[i], cv[i], ci[i] = value[i], verbs[i], ids[i] end
 		else
 			step.value = value
 		end
-		step.list, step.verbs = copy, cv
+		step.list, step.verbs, step.ids = copy, cv, ci
 		applyStep(stepButton)
 	end
 	farWatched = farWatch
@@ -3956,6 +3995,11 @@ end)
 ns.On("RARE_NEARBY", refreshSoon)
 ns.On("FLIGHT_MARK_CHANGED", refreshSoon)
 ns.On("QUESTDB_LOADED", refreshSoon)
+-- Kills of an NPC the Codex marks friendly keep the plain lookups (Buttons.KillVerb).
+ns.On("CODEX_LOADED", function()
+	target.sig, step.sig = nil, nil
+	refreshSoon()
+end)
 ns.On("NAME_LEARNED", refreshSoon)
 ns.On("BAG_SPACE", refreshSoon)
 ns.On("WHILE_HERE_CHANGED", refreshSoon)

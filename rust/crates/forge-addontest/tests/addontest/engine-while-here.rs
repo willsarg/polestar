@@ -1834,6 +1834,8 @@ fn the_step_key_targets_a_line_s_mobs_after_the_live_step_s_own_1316() {
 			TEST_SOURCE,
 			&GUIDE.replace("ESCORT", ""),
 			HELPERS,
+			// A loaded Codex that marks neither mob friendly: their kills keep the retry (Buttons.KillVerb).
+			"Polestar.Codex.IsLoaded = function() return true end; Polestar.Codex.Npc = function() return nil end",
 			"stub.login()",
 			r#"stub.fire("QUEST_LOG_UPDATE"); stub.advance(0.6)"#,
 			// The macro lines without Mark target's (on by default) icon line.

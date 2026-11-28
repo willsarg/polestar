@@ -157,7 +157,7 @@ function NameTargets.Refresh()
 			if changed then
 				b:SetAttribute("macrotext1", macro)
 				b.psMacro = macro
-				buttons.SetPress(b, { name }, entry.goal.t == "kill" and "kill" or kind, macro, false)
+				buttons.SetPress(b, { name }, select(2, buttons.MacroNameCount(macro)) and "kill" or kind, macro, false)
 			end
 			place(b)
 			-- A shared mark cycle changes the macro under a stationary cursor.
@@ -203,6 +203,8 @@ ns.RegisterEvent("PLAYER_REGEN_DISABLED", function()
 end)
 ns.RegisterEvent("PLAYER_REGEN_ENABLED", NameTargets.Refresh)
 ns.On("QOL_TARGET_MARK_CHANGED", NameTargets.Refresh)
+-- A kill of an NPC the Codex marks friendly keeps the plain lookups (Buttons.KillVerb).
+ns.On("CODEX_LOADED", NameTargets.Refresh)
 -- Hiding Polestar hides the window, so the buttons go (out of combat: in a
 -- fight the secure driver already hides them, and the fight's end refreshes).
 ns.On("POLESTAR_HIDDEN", NameTargets.Refresh)

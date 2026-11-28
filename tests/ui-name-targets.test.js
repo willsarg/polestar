@@ -138,6 +138,8 @@ function run(script, { before = '', enabled = true } = {}) {
 
 test('each enabled mob or item-source objective uses the shared target macro with the default skull mark', () => {
 	const [out] = run(`
+		-- A loaded Codex that marks Kobold Vermin (6) not friendly: the kill keeps the retry (Buttons.KillVerb).
+		Polestar.Codex = { IsLoaded = function() return true end, Npc = function() return nil end }
 		uistub.setGuide(uistub.elwynn, 3)
 		settle()
 		local kill = targetFor(rowFor("Kobold Vermin"))
@@ -503,6 +505,54 @@ test('objective clicks retain row navigation and the quest right-click menu', ()
 	assert.equal(out.useOnKeyDown, false);
 	assert.equal(out.noRightMacro, true);
 	assert.equal(out.wholeRow, true);
+});
+
+test('a kill of an NPC the Codex marks friendly to the character keeps the plain lookup, also on a press', () => {
+	const [out] = run(`
+		Polestar.Compat.GetPlayerFaction = function() return "Horde" end
+		-- The press reads the target's name (Buttons.CycleIndex).
+		Polestar.Compat.Readable = function(v) return v end
+		Polestar.Codex = {
+			IsLoaded = function() return true end,
+			Npc = function(id) return id == 10556 and { id = id, faction = "H" } or nil end,
+		}
+		local goal = uistub.guides[uistub.elwynn].steps[3].goals[3]
+		goal.subject, goal.npc, goal.quest = "Lazy Peon", 10556, 5441
+		uistub.setGuide(uistub.elwynn, 3)
+		settle()
+		local button = assert(targetFor(rowFor("Lazy Peon")), "missing mob overlay")
+		stub.qol.target = { name = "Lazy Peon", hostile = false }
+		stub.qol.ran = {}
+		stub.qol.mouseClick(button)
+		emit({ macro = button:GetAttribute("macrotext1"), ran = stub.qol.ran[1] and stub.qol.ran[1][2] or false })`);
+	assert.equal(out.macro, '/cleartarget [nocombat][dead]\n/targetexact Lazy Peon\n/cleartarget [dead]\n/tm [@target,harm,nodead] !8');
+	assert.equal(out.ran, '/targetexact Lazy Peon\n/cleartarget [dead]\n/tm [@target,harm,nodead] !8',
+		'a press on a living Lazy Peon moves on without the retry');
+});
+
+test('a kill overlay takes the retry once the Codex loads', () => {
+	const [out] = run(`
+		Polestar.Set("lookup.enabled", false)
+		Polestar.Compat.GetPlayerFaction = function() return "Alliance" end
+		local loaded = false
+		Polestar.Codex = {
+			IsLoaded = function() return loaded end,
+			Npc = function(id) return id == 10556 and { id = id, faction = "H" } or nil end,
+		}
+		local goal = uistub.guides[uistub.elwynn].steps[3].goals[3]
+		goal.subject, goal.npc, goal.quest = "Lazy Peon", 10556, 5441
+		uistub.setGuide(uistub.elwynn, 3)
+		settle()
+		local button = assert(targetFor(rowFor("Lazy Peon")), "missing mob overlay")
+		local before = button:GetAttribute("macrotext1")
+		loaded = true
+		Polestar.Fire("CODEX_LOADED")
+		settle()
+		emit({ before = before, after = button:GetAttribute("macrotext1") })`);
+	assert.equal(out.before, '/cleartarget [nocombat][dead]\n/targetexact Lazy Peon\n/cleartarget [dead]\n/tm [@target,harm,nodead] !8',
+		'not loaded, Lookup off: the plain lookup');
+	assert.equal(out.after, '/cleartarget [nocombat][dead]\n/targetexact Lazy Peon\n/targetexact [noharm] Lazy Peon\n/cleartarget [dead][noharm]\n/tm [@target,harm,nodead] !8',
+		'the other side\'s NPC once the Codex has loaded');
 });
 
 test('an objective overlay runs its macro once per mouse click, on the release, at either key-down setting', () => {

@@ -217,6 +217,29 @@ test('a retry that selects the same friendly namesake leaves it unmarked and unp
 	}
 });
 
+test('a kill of an NPC the Codex marks friendly to the character targets it alone', () => {
+	const rows = run(`
+		local side = "Horde"
+		UnitFactionGroup = function() return side, side end
+		local factions = { [10556] = "H", [12427] = "A" }
+		Polestar.Codex = {
+			IsLoaded = function() return true end,
+			Npc = function(id) return factions[id] and { id = id, faction = factions[id] } or nil end,
+		}
+		for _, goal in ipairs({ { 10556, "Lazy Peon", "Horde" }, { 12427, "Mountaineer Dolf", "Alliance" } }) do
+			side = goal[3]
+			q.step({ { t = "kill", target = goal[2], npc = goal[1] } })
+			for _, button in ipairs({ PolestarTargetButton, PolestarStepButton }) do
+				world(unit(goal[2])); emit(click(button))
+			end
+		end
+	`);
+	assert.deepEqual(rows.map(outcome), [
+		['Lazy Peon', 0, 1], ['Lazy Peon', 0, 1], ['Mountaineer Dolf', 0, 1], ['Mountaineer Dolf', 0, 1],
+	]);
+	for (const row of rows) assert.doesNotMatch(row.macro, /\[noharm\]/);
+});
+
 test('in combat a kill search replaces a party member with the quest mob and clears the target on a miss', () => {
 	const rows = run(`
 		q.step({ { t = "kill", target = "Hatefury Hellcaller" } })
