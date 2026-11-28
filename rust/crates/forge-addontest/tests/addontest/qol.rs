@@ -1450,11 +1450,7 @@ fn kill_targets_of_an_npc_the_codex_marks_friendly_to_the_character_s_side_keep_
 	"#);
 	let plain = |name: &str| format!("/cleartarget [nocombat][dead]\n/targetexact {name}\n/cleartarget [dead]");
 	assert_eq!(out[0], json!(vec![plain("Lazy Peon"); 3]), "a Horde character's Lazy Peon (faction H)");
-	assert_eq!(
-		out[1],
-		json!(vec!["/targetexact Lazy Peon\n/cleartarget [dead]"; 3]),
-		"a press on a living Lazy Peon keeps the plain lookup on the button, the step key and the row"
-	);
+	assert_eq!(out[1], json!(vec!["/targetexact Lazy Peon\n/cleartarget [dead]"; 3]), "a press on a living Lazy Peon keeps the plain lookup on the button, the step key and the row");
 	assert_eq!(out[2], json!(vec![plain("Mountaineer Dolf"); 3]), "an Alliance character's Mountaineer Dolf (faction A)");
 	assert_eq!(out[3], json!(vec![kill_macro("Lazy Peon"); 3]), "the other side's NPC keeps the retry");
 	assert_eq!(out[4], json!(vec![plain("Lazy Peon"); 3]), "faction AH, applied again when the Codex loads");
